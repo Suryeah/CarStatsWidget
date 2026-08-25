@@ -171,7 +171,7 @@ struct BLEView: View {
                             ))
                             
                             Text(
-                                "\(characteristic.properties)"
+                                String(describing: characteristic.properties)
                             )
                             .font(.caption)
                             .foregroundStyle(.secondary)
