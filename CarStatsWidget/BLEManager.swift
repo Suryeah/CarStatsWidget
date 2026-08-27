@@ -5,7 +5,6 @@
 //  Created by Surya Vardhan on 26/08/26.
 //
 
-
 import Foundation
 import CoreBluetooth
 import Observation
@@ -24,6 +23,9 @@ final class BLEManager: NSObject {
     private(set) var services: [CBService] = []
     private(set) var characteristics: [CBCharacteristic] = []
     
+    private var txCharacteristic: CBCharacteristic?
+    private var rxCharacteristic: CBCharacteristic?
+    
     override init() {
         super.init()
         
@@ -32,6 +34,7 @@ final class BLEManager: NSObject {
             queue: nil
         )
     }
+    
     
     // MARK: - Scanning
     
@@ -55,12 +58,15 @@ final class BLEManager: NSObject {
         )
     }
     
+    
     func stopScanning() {
+        
         centralManager.stopScan()
         isScanning = false
         
         print("BLE scan stopped")
     }
+    
     
     // MARK: - Connection
     
@@ -80,6 +86,7 @@ final class BLEManager: NSObject {
         )
     }
     
+    
     func disconnect() {
         
         guard let peripheral = connectedPeripheral else {
@@ -87,6 +94,65 @@ final class BLEManager: NSObject {
         }
         
         centralManager.cancelPeripheralConnection(peripheral)
+    }
+    
+    // MARK: - OBD-II SOC
+
+    func requestSOC() {
+        
+        guard let peripheral = connectedPeripheral else {
+            print("SOC: No connected peripheral")
+            return
+        }
+        
+        guard let characteristic = txCharacteristic else {
+            print("SOC: TX characteristic not available")
+            return
+        }
+        
+        // Tata Nexon EV:
+        // UDS ReadDataByIdentifier
+        // DID = 0x3424
+        // Request = 22 34 24
+        let command = "223424\r"
+        
+        print("SOC TX:", command.trimmingCharacters(in: .newlines))
+        
+        if let data = command.data(using: .ascii) {
+            peripheral.writeValue(
+                data,
+                for: characteristic,
+                type: .withResponse
+            )
+        }
+    }
+    
+    func sendCommand(_ command: String) {
+        
+        guard let peripheral = connectedPeripheral else {
+            print("Cannot send command: not connected")
+            return
+        }
+        
+        guard let characteristic = txCharacteristic else {
+            print("Cannot send command: FFF2 not found")
+            return
+        }
+        
+        let commandToSend = command + "\r"
+        
+        guard let data = commandToSend.data(using: .ascii) else {
+            print("Failed to encode command")
+            return
+        }
+        
+        print("TX:", commandToSend.debugDescription)
+        
+        peripheral.writeValue(
+            data,
+            for: characteristic,
+            type: .withResponse
+        )
     }
 }
 
@@ -130,6 +196,7 @@ extension BLEManager: CBCentralManagerDelegate {
         }
     }
     
+    
     func centralManager(
         _ central: CBCentralManager,
         didDiscover peripheral: CBPeripheral,
@@ -155,6 +222,7 @@ extension BLEManager: CBCentralManagerDelegate {
         discoveredDevices.append(peripheral)
     }
     
+    
     func centralManager(
         _ central: CBCentralManager,
         didConnect peripheral: CBPeripheral
@@ -170,6 +238,7 @@ extension BLEManager: CBCentralManagerDelegate {
         peripheral.discoverServices(nil)
     }
     
+    
     func centralManager(
         _ central: CBCentralManager,
         didFailToConnect peripheral: CBPeripheral,
@@ -183,6 +252,7 @@ extension BLEManager: CBCentralManagerDelegate {
         
         connectedPeripheral = nil
     }
+    
     
     func centralManager(
         _ central: CBCentralManager,
@@ -198,6 +268,9 @@ extension BLEManager: CBCentralManagerDelegate {
         connectedPeripheral = nil
         services.removeAll()
         characteristics.removeAll()
+        
+        txCharacteristic = nil
+        rxCharacteristic = nil
     }
 }
 
@@ -241,6 +314,7 @@ extension BLEManager: CBPeripheralDelegate {
         }
     }
     
+    
     func peripheral(
         _ peripheral: CBPeripheral,
         didDiscoverCharacteristicsFor service: CBService,
@@ -282,6 +356,68 @@ extension BLEManager: CBPeripheralDelegate {
                 "Properties:",
                 characteristic.properties
             )
+            
+            // FFF1 = data coming FROM the OBD adapter
+            
+            if characteristic.uuid == CBUUID(string: "FFF1") {
+                
+                rxCharacteristic = characteristic
+                
+                peripheral.setNotifyValue(
+                    true,
+                    for: characteristic
+                )
+                
+                print(
+                    "FFF1 configured for notifications"
+                )
+            }
+            
+            // FFF2 = commands going TO the OBD adapter
+            
+            if characteristic.uuid == CBUUID(string: "FFF2") {
+                
+                txCharacteristic = characteristic
+                
+                print(
+                    "FFF2 configured for writing"
+                )
+                
+                sendCommand("015B")
+            }
         }
+    }
+    
+    
+    // MARK: - BLE RX
+    
+    func peripheral(
+        _ peripheral: CBPeripheral,
+        didUpdateValueFor characteristic: CBCharacteristic,
+        error: Error?
+    ) {
+        
+        if let error {
+            print(
+                "RX error:",
+                error.localizedDescription
+            )
+            return
+        }
+        
+        guard let data = characteristic.value else {
+            print("RX: empty")
+            return
+        }
+        
+        print(
+            "RX characteristic:",
+            characteristic.uuid.uuidString
+        )
+        
+        print(
+            "RX raw data:",
+            data as NSData
+        )
     }
 }
