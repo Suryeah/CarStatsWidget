@@ -26,6 +26,9 @@ final class BLEManager: NSObject {
     private var txCharacteristic: CBCharacteristic?
     private var rxCharacteristic: CBCharacteristic?
     
+    private var rxBuffer = ""
+    private(set) var soc: Int?
+    
     override init() {
         super.init()
         
@@ -383,7 +386,7 @@ extension BLEManager: CBPeripheralDelegate {
                     "FFF2 configured for writing"
                 )
                 
-                sendCommand("015B")
+                requestSOC()
             }
         }
     }
@@ -396,7 +399,6 @@ extension BLEManager: CBPeripheralDelegate {
         didUpdateValueFor characteristic: CBCharacteristic,
         error: Error?
     ) {
-        
         if let error {
             print(
                 "RX error:",
@@ -404,20 +406,119 @@ extension BLEManager: CBPeripheralDelegate {
             )
             return
         }
-        
+
         guard let data = characteristic.value else {
             print("RX: empty")
             return
         }
-        
-        print(
-            "RX characteristic:",
-            characteristic.uuid.uuidString
+
+        guard let text = String(
+            data: data,
+            encoding: .ascii
+        ) else {
+            print("RX: Failed to decode ASCII")
+            return
+        }
+
+        print("RX ASCII:", text.debugDescription)
+
+        rxBuffer += text
+
+        // ELM327 sends ">" when the response is complete.
+        guard rxBuffer.contains(">") else {
+            return
+        }
+
+        print("ELM RESPONSE:", rxBuffer.debugDescription)
+
+        let response = rxBuffer
+            .components(separatedBy: ">")
+            .first?
+            .trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ) ?? ""
+
+        rxBuffer = ""
+
+        print("OBD RESPONSE:", response)
+
+        // Expected response:
+        // 7EB0462342451
+        //
+        // 7EB = CAN ID
+        // 04  = payload length
+        // 62 34 24 51 = UDS response
+        //             ^^
+        //             SOC = 0x51 = 81%
+
+        let cleanResponse = response
+            .replacingOccurrences(of: " ", with: "")
+
+        guard cleanResponse.hasPrefix("7EB0") else {
+            print(
+                "SOC: Unexpected response:",
+                cleanResponse
+            )
+            return
+        }
+
+        guard cleanResponse.count >= 12 else {
+            print("SOC: Response too short")
+            return
+        }
+
+        // Skip:
+        // 7EB0
+        //
+        // Remaining:
+        // 62342451
+
+        let payloadStart = cleanResponse.index(
+            cleanResponse.startIndex,
+            offsetBy: 4
         )
-        
-        print(
-            "RX raw data:",
-            data as NSData
+
+        let payload = String(
+            cleanResponse[payloadStart...]
         )
+
+        guard payload.count >= 8 else {
+            print("SOC: Payload too short")
+            return
+        }
+
+        // Payload:
+        // 62 34 24 51
+        //
+        // SOC is the final byte: 51
+
+        let socHexStart = payload.index(
+            payload.startIndex,
+            offsetBy: 6
+        )
+
+        let socHexEnd = payload.index(
+            socHexStart,
+            offsetBy: 2
+        )
+
+        let socHex = String(
+            payload[socHexStart..<socHexEnd]
+        )
+
+        guard let socValue = Int(
+            socHex,
+            radix: 16
+        ) else {
+            print(
+                "SOC: Failed to parse:",
+                socHex
+            )
+            return
+        }
+
+        soc = socValue
+
+        print("===== SOC ===== \(socValue) %")
     }
 }
