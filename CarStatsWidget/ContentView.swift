@@ -4,7 +4,18 @@ import CoreBluetooth
 struct ContentView: View {
     
     @State private var vehicleManager = VehicleManager()
-    @State private var bleManager = BLEManager()
+    @State private var bleManager: BLEManager
+    
+    init() {
+        let vehicleManager = VehicleManager()
+        
+        _vehicleManager = State(initialValue: vehicleManager)
+        _bleManager = State(
+            initialValue: BLEManager(
+                vehicleManager: vehicleManager
+            )
+        )
+    }
     
     var body: some View {
         ZStack {
@@ -36,13 +47,21 @@ struct ContentView: View {
                             .font(.headline)
                             .foregroundStyle(.secondary)
                         
-                        Text("\(vehicleManager.state.soc)%")
+                        Text(String(format: "%.1f", vehicleManager.state.soc))
                             .font(.system(
                                 size: 72,
                                 weight: .bold,
                                 design: .rounded
                             ))
                             .contentTransition(.numericText())
+
+                        Text("%")
+                            .font(.system(
+                                size: 36,
+                                weight: .bold,
+                                design: .rounded
+                            ))
+                        
                         
                         HStack(spacing: 6) {
                             Circle()

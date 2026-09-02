@@ -13,6 +13,12 @@ final class VehicleManager {
     
     var state: VehicleState = .initial
     
+    func updateSOC(_ soc: Double) {
+        state.soc = soc
+        state.lastUpdated = Date()
+        state.isConnected = true
+    }
+    
     func simulateSOCChange() {
         
         state.soc -= 1

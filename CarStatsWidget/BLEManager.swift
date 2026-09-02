@@ -25,11 +25,17 @@ final class BLEManager: NSObject {
     
     private var txCharacteristic: CBCharacteristic?
     private var rxCharacteristic: CBCharacteristic?
-    
+
+    private let vehicleManager: VehicleManager
+
     private var rxBuffer = ""
+    private var rxNotificationsReady = false
+
     private(set) var soc: Int?
     
-    override init() {
+    init(vehicleManager: VehicleManager) {
+        self.vehicleManager = vehicleManager
+        
         super.init()
         
         centralManager = CBCentralManager(
@@ -102,25 +108,25 @@ final class BLEManager: NSObject {
     // MARK: - OBD-II SOC
 
     func requestSOC() {
-        
+
         guard let peripheral = connectedPeripheral else {
             print("SOC: No connected peripheral")
             return
         }
-        
+
         guard let characteristic = txCharacteristic else {
             print("SOC: TX characteristic not available")
             return
         }
-        
-        // Tata Nexon EV:
+
+        // Tata Nexon EV HV Battery SoC
         // UDS ReadDataByIdentifier
-        // DID = 0x3424
-        // Request = 22 34 24
-        let command = "223424\r"
-        
+        // DID = 0x3421
+        // Request = 22 34 21
+        let command = "223421\r"
+
         print("SOC TX:", command.trimmingCharacters(in: .newlines))
-        
+
         if let data = command.data(using: .ascii) {
             peripheral.writeValue(
                 data,
@@ -274,6 +280,9 @@ extension BLEManager: CBCentralManagerDelegate {
         
         txCharacteristic = nil
         rxCharacteristic = nil
+        
+        rxBuffer = ""
+        rxNotificationsReady = false
     }
 }
 
@@ -332,15 +341,11 @@ extension BLEManager: CBPeripheralDelegate {
             return
         }
         
-        guard let discoveredCharacteristics =
-                service.characteristics
-        else {
+        guard let discoveredCharacteristics = service.characteristics else {
             return
         }
         
-        characteristics.append(
-            contentsOf: discoveredCharacteristics
-        )
+        characteristics.append(contentsOf: discoveredCharacteristics)
         
         print(
             "===== CHARACTERISTICS FOR",
@@ -371,6 +376,8 @@ extension BLEManager: CBPeripheralDelegate {
                     for: characteristic
                 )
                 
+                rxNotificationsReady = true
+                
                 print(
                     "FFF1 configured for notifications"
                 )
@@ -385,10 +392,24 @@ extension BLEManager: CBPeripheralDelegate {
                 print(
                     "FFF2 configured for writing"
                 )
-                
-                requestSOC()
             }
         }
+        
+        // Only send the command once both RX and TX are ready.
+        requestSOCIfReady()
+    }
+    
+    private func requestSOCIfReady() {
+        
+        guard rxNotificationsReady else {
+            return
+        }
+        
+        guard txCharacteristic != nil else {
+            return
+        }
+        
+        requestSOC()
     }
     
     
@@ -399,6 +420,7 @@ extension BLEManager: CBPeripheralDelegate {
         didUpdateValueFor characteristic: CBCharacteristic,
         error: Error?
     ) {
+        
         if let error {
             print(
                 "RX error:",
@@ -406,119 +428,186 @@ extension BLEManager: CBPeripheralDelegate {
             )
             return
         }
-
+        
+        guard characteristic.uuid == CBUUID(string: "FFF1") else {
+            return
+        }
+        
         guard let data = characteristic.value else {
             print("RX: empty")
             return
         }
-
-        guard let text = String(
+        
+        print(
+            "RX characteristic:",
+            characteristic.uuid.uuidString
+        )
+        
+        print(
+            "RX raw data:",
+            data as NSData
+        )
+        
+        guard let response = String(
             data: data,
             encoding: .ascii
         ) else {
-            print("RX: Failed to decode ASCII")
+            print(
+                "RX: Could not decode ASCII response"
+            )
             return
         }
-
-        print("RX ASCII:", text.debugDescription)
-
-        rxBuffer += text
-
-        // ELM327 sends ">" when the response is complete.
+        
+        print(
+            "RX ASCII:",
+            response.debugDescription
+        )
+        
+        // ---------------------------------------------------------
+        // IMPORTANT:
+        // BLE notifications are chunks, not complete ELM327 frames.
+        // Append every chunk until the ELM327 prompt ">" arrives.
+        // ---------------------------------------------------------
+        
+        rxBuffer += response
+        
+        print(
+            "RX buffer:",
+            rxBuffer.debugDescription
+        )
+        
+        // ELM327 uses ">" to indicate that the complete response
+        // to the command has been received.
         guard rxBuffer.contains(">") else {
             return
         }
-
-        print("ELM RESPONSE:", rxBuffer.debugDescription)
-
-        let response = rxBuffer
-            .components(separatedBy: ">")
-            .first?
-            .trimmingCharacters(
-                in: .whitespacesAndNewlines
-            ) ?? ""
-
+        
+        let completeResponse = rxBuffer
+        
+        // Clear buffer immediately so the next command starts clean.
         rxBuffer = ""
-
-        print("OBD RESPONSE:", response)
-
-        // Expected response:
-        // 7EB0462342451
-        //
-        // 7EB = CAN ID
-        // 04  = payload length
-        // 62 34 24 51 = UDS response
-        //             ^^
-        //             SOC = 0x51 = 81%
-
-        let cleanResponse = response
+        
+        print(
+            "===== COMPLETE ELM RESPONSE ====="
+        )
+        
+        print(
+            completeResponse.debugDescription
+        )
+        
+        // ---------------------------------------------------------
+        // Remove ELM327 prompt / line formatting.
+        // ---------------------------------------------------------
+        
+        let cleaned = completeResponse
+            .replacingOccurrences(of: "\r", with: "")
+            .replacingOccurrences(of: "\n", with: "")
+            .replacingOccurrences(of: ">", with: "")
             .replacingOccurrences(of: " ", with: "")
-
-        guard cleanResponse.hasPrefix("7EB0") else {
+            .trimmingCharacters(in: .whitespaces)
+        
+        print(
+            "RX cleaned:",
+            cleaned
+        )
+        
+        // ---------------------------------------------------------
+        // Ignore the echoed command.
+        //
+        // Example:
+        //
+        // 22342162342103AD
+        //
+        // The actual response starts at 623421.
+        // ---------------------------------------------------------
+        
+        guard let didRange = cleaned.range(
+            of: "623421"
+        ) else {
             print(
-                "SOC: Unexpected response:",
-                cleanResponse
+                "SOC: DID 3421 not found"
+            )
+            print(
+                "=================================="
             )
             return
         }
-
-        guard cleanResponse.count >= 12 else {
-            print("SOC: Response too short")
+        
+        // ---------------------------------------------------------
+        // DID 3421 response:
+        //
+        // 62 34 21 XX XX
+        //
+        // XX XX = raw HV Battery SoC
+        // ---------------------------------------------------------
+        
+        let valueStart = didRange.upperBound
+        
+        guard cleaned.distance(
+            from: valueStart,
+            to: cleaned.endIndex
+        ) >= 4 else {
+            print(
+                "SOC: Incomplete DID 3421 response"
+            )
+            print(
+                "=================================="
+            )
             return
         }
-
-        // Skip:
-        // 7EB0
-        //
-        // Remaining:
-        // 62342451
-
-        let payloadStart = cleanResponse.index(
-            cleanResponse.startIndex,
+        
+        let valueEnd = cleaned.index(
+            valueStart,
             offsetBy: 4
         )
-
-        let payload = String(
-            cleanResponse[payloadStart...]
+        
+        let rawString = String(
+            cleaned[valueStart..<valueEnd]
         )
-
-        guard payload.count >= 8 else {
-            print("SOC: Payload too short")
-            return
-        }
-
-        // Payload:
-        // 62 34 24 51
-        //
-        // SOC is the final byte: 51
-
-        let socHexStart = payload.index(
-            payload.startIndex,
-            offsetBy: 6
-        )
-
-        let socHexEnd = payload.index(
-            socHexStart,
-            offsetBy: 2
-        )
-
-        let socHex = String(
-            payload[socHexStart..<socHexEnd]
-        )
-
-        guard let socValue = Int(
-            socHex,
+        
+        guard let rawValue = UInt16(
+            rawString,
             radix: 16
         ) else {
             print(
-                "SOC: Failed to parse:",
-                socHex
+                "SOC: Invalid raw value:",
+                rawString
+            )
+            print(
+                "=================================="
             )
             return
         }
-
-        soc = socValue
-
-        print("===== SOC ===== \(socValue) %")
+        
+        // Tata Nexon EV:
+        //
+        // Raw value / 10 = HV Battery SoC %
+        
+        let soc = Double(rawValue) / 10.0
+        
+        print(
+            "===== SOC DECODE ====="
+        )
+        
+        print(
+            "SOC raw:",
+            rawString
+        )
+        
+        print(
+            "SOC raw decimal:",
+            rawValue
+        )
+        
+        print(
+            "SOC:",
+            String(format: "%.1f%%", soc)
+        )
+        
+        vehicleManager.updateSOC(soc)
+        
+        print(
+            "======================"
+        )
     }
 }

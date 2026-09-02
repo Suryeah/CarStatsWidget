@@ -9,9 +9,16 @@ import SwiftUI
 import CoreBluetooth
 
 struct BLEView: View {
-    
-    @State private var bleManager = BLEManager()
-    
+    @State private var bleManager: BLEManager
+    let vehicleManager: VehicleManager
+
+    init(vehicleManager: VehicleManager) {
+        self.vehicleManager = vehicleManager
+        _bleManager = State(
+            initialValue: BLEManager(vehicleManager: vehicleManager)
+        )
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -184,7 +191,6 @@ struct BLEView: View {
     }
 }
 
-
 #Preview {
-    BLEView()
+    BLEView(vehicleManager: VehicleManager())
 }

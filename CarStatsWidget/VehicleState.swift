@@ -8,7 +8,7 @@
 import Foundation
 
 struct VehicleState {
-    var soc: Int
+    var soc: Double
     var lastUpdated: Date
     var isConnected: Bool
     
