@@ -30,6 +30,8 @@ final class BLEManager: NSObject {
 
     private var rxBuffer = ""
     private var rxNotificationsReady = false
+    private var pollingTimer: Timer?
+    private var pollingInterval: TimeInterval = 5.0
 
     private(set) var soc: Int?
     
@@ -97,12 +99,44 @@ final class BLEManager: NSObject {
     
     
     func disconnect() {
-        
+        stopPolling()
+
         guard let peripheral = connectedPeripheral else {
             return
         }
-        
+
         centralManager.cancelPeripheralConnection(peripheral)
+    }
+
+    // MARK: - Polling
+
+    func setPollingInterval(_ interval: TimeInterval) {
+        guard interval > 0 else {
+            return
+        }
+
+        pollingInterval = interval
+
+        // Apply a changed interval immediately when the vehicle is ready.
+        if connectedPeripheral != nil && rxNotificationsReady && txCharacteristic != nil {
+            startPolling()
+        }
+    }
+
+    private func startPolling() {
+        stopPolling()
+
+        // Request once immediately, then continue at the selected interval.
+        requestSOC()
+
+        pollingTimer = Timer.scheduledTimer(withTimeInterval: pollingInterval, repeats: true) { [weak self] _ in
+            self?.requestSOC()
+        }
+    }
+
+    private func stopPolling() {
+        pollingTimer?.invalidate()
+        pollingTimer = nil
     }
     
     // MARK: - OBD-II SOC
@@ -274,6 +308,7 @@ extension BLEManager: CBCentralManagerDelegate {
             peripheral.name ?? "Unknown"
         )
         
+        stopPolling()
         connectedPeripheral = nil
         services.removeAll()
         characteristics.removeAll()
@@ -409,7 +444,7 @@ extension BLEManager: CBPeripheralDelegate {
             return
         }
         
-        requestSOC()
+        startPolling()
     }
     
     

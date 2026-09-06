@@ -5,6 +5,7 @@ struct ContentView: View {
     
     @State private var vehicleManager = VehicleManager()
     @State private var bleManager: BLEManager
+    @AppStorage("pollingInterval") private var pollingInterval: Double = 5.0
     
     init() {
         let vehicleManager = VehicleManager()
@@ -118,10 +119,27 @@ struct ContentView: View {
                     
                     // MARK: - Polling
                     
-                    SettingsCard(
-                        title: "Polling Interval",
-                        value: "5 seconds"
-                    )
+                    Menu {
+                        ForEach([1.0, 5.0, 10.0, 30.0, 60.0], id: \.self) { interval in
+                            Button {
+                                pollingInterval = interval
+                            } label: {
+                                HStack {
+                                    Text(pollingIntervalText(interval))
+                                    if pollingInterval == interval {
+                                        Spacer()
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        SettingsCard(
+                            title: "Polling Interval",
+                            value: pollingIntervalText(pollingInterval)
+                        )
+                    }
+                    .buttonStyle(.plain)
                     
                     
                     // MARK: - Simulation
@@ -141,6 +159,19 @@ struct ContentView: View {
                 .padding(.bottom, 30)
             }
         }
+        .onAppear {
+            bleManager.setPollingInterval(pollingInterval)
+        }
+        .onChange(of: pollingInterval) { _, newValue in
+            bleManager.setPollingInterval(newValue)
+        }
+    }
+
+    private func pollingIntervalText(_ interval: Double) -> String {
+        if interval == 1 {
+            return "1 second"
+        }
+        return "\(Int(interval)) seconds"
     }
     
     // MARK: - Simulation

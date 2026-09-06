@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs>
+  <linearGradient id="green" x1="0" y1="1" x2="1" y2="0">
+    <stop offset="0" stop-color="#12D889"/>
+    <stop offset=".72" stop-color="#7CF044"/>
+    <stop offset="1" stop-color="#B8FA59"/>
+  </linearGradient>
+  <linearGradient id="cyan" x1="0" y1="1" x2="1" y2="0">
+    <stop offset="0" stop-color="#63F7C2"/>
+    <stop offset="1" stop-color="#25DFF8"/>
+  </linearGradient>
+  <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#22D7F7"/>
+    <stop offset=".55" stop-color="#148BFF"/>
+    <stop offset="1" stop-color="#3158FF"/>
+  </linearGradient>
+  <filter id="softGlow" x="-25%" y="-25%" width="150%" height="150%">
+    <feGaussianBlur stdDeviation="4"/>
+  </filter>
+</defs>
+
+<!--
+  GEOMETRY SPEC
+  Canvas: 1024 x 1024
+  Center: (512, 512)
+  Radius: 320
+  Stroke: 56
+  Segment angles:
+    Green: 150° -> 230°
+    Cyan:   40° -> 140°
+    Blue:  -50° ->  40°
+  The arcs use identical center/radius, so their curvature is perfectly
+  concentric. 10° visual gaps separate each segment.
+-->
+
+<!-- subtle glow -->
+<path d="M512 192 A320 320 0 0 0 306.3 266.9 A320 320 0 0 0 224.7 757.7"
+      fill="none" stroke="#52FFB1" stroke-width="64" stroke-linecap="round" opacity=".12" filter="url(#softGlow)"/>
+<path d="M266.9 306.3 A320 320 0 0 1 757.7 224.7"
+      fill="none" stroke="#38EFFF" stroke-width="64" stroke-linecap="round" opacity=".12" filter="url(#softGlow)"/>
+<path d="M757.7 799.3 A320 320 0 0 0 799.3 266.9"
+      fill="none" stroke="#248FFF" stroke-width="64" stroke-linecap="round" opacity=".12" filter="url(#softGlow)"/>
+
+<!-- actual gauge segments -->
+<!-- GREEN: 150° -> 230° -->
+<path d="M235.0 672.0 A320 320 0 0 1 306.3 266.9"
+      fill="none" stroke="url(#green)" stroke-width="56" stroke-linecap="round"/>
+
+<!-- CYAN: 40° -> 140° -->
+<path d="M757.7 266.9 A320 320 0 0 0 266.9 306.3"
+      fill="none" stroke="url(#cyan)" stroke-width="56" stroke-linecap="round"/>
+
+<!-- BLUE: -50° -> 40° -->
+<path d="M717.7 757.7 A320 320 0 0 0 757.7 266.9"
+      fill="none" stroke="url(#blue)" stroke-width="56" stroke-linecap="round"/>
+
+</svg>
