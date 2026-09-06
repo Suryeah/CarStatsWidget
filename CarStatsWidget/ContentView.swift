@@ -48,7 +48,16 @@ struct ContentView: View {
                             .font(.headline)
                             .foregroundStyle(.secondary)
                         
-                        Text(String(format: "%.1f", vehicleManager.state.soc))
+                        HStack(
+                            alignment: .firstTextBaseline,
+                            spacing: 3
+                        ) {
+                            Text(
+                                String(
+                                    format: "%.1f",
+                                    vehicleManager.state.soc
+                                )
+                            )
                             .font(.system(
                                 size: 72,
                                 weight: .bold,
@@ -56,12 +65,13 @@ struct ContentView: View {
                             ))
                             .contentTransition(.numericText())
 
-                        Text("%")
-                            .font(.system(
-                                size: 36,
-                                weight: .bold,
-                                design: .rounded
-                            ))
+                            Text("%")
+                                .font(.system(
+                                    size: 36,
+                                    weight: .bold,
+                                    design: .rounded
+                                ))
+                        }
                         
                         
                         HStack(spacing: 6) {
