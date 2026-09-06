@@ -241,166 +241,102 @@ struct SettingsCard: View {
 // MARK: - Bluetooth Card
 
 struct BluetoothCard: View {
-    
+
     var bleManager: BLEManager
-    
+
+    @State private var showingDevicePicker = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            
-            // Header
-            
+
             HStack {
                 Image(systemName: "antenna.radiowaves.left.and.right")
                     .font(.title3)
-                
+
                 Text("Bluetooth")
                     .font(.headline)
-                
+
                 Spacer()
-                
+
                 Circle()
-                    .fill(
-                        bleManager.isBluetoothReady
-                        ? Color.green
-                        : Color.red
-                    )
+                    .fill(bleManager.isBluetoothReady ? Color.green : Color.red)
                     .frame(width: 8, height: 8)
-                
-                Text(
-                    bleManager.isBluetoothReady
-                    ? "Ready"
-                    : "Unavailable"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+
+                Text(bleManager.isBluetoothReady ? "Ready" : "Unavailable")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            
-            
-            // Scan button
-            
+
             Button {
-                if bleManager.isScanning {
-                    bleManager.stopScanning()
-                } else {
-                    bleManager.startScanning()
-                }
+                bleManager.startScanning()
+                showingDevicePicker = true
             } label: {
                 Label(
-                    bleManager.isScanning
-                    ? "Stop Scanning"
-                    : "Scan for OBD Devices",
-                    systemImage:
-                        bleManager.isScanning
-                        ? "stop.circle"
-                        : "dot.radiowaves.left.and.right"
+                    bleManager.connectedPeripheral == nil
+                    ? "Scan for OBD Devices"
+                    : "Change OBD Device",
+                    systemImage: "dot.radiowaves.left.and.right"
                 )
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .disabled(!bleManager.isBluetoothReady)
-            
-            
-            // Discovered devices
-            
-            if !bleManager.discoveredDevices.isEmpty {
-                
+
+            if let peripheral = bleManager.connectedPeripheral {
                 VStack(alignment: .leading, spacing: 8) {
-                    
-                    Text("Discovered Devices")
+                    Text("Selected Device")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    
-                    ForEach(
-                        bleManager.discoveredDevices,
-                        id: \.identifier
-                    ) { peripheral in
-                        
-                        Button {
-                            bleManager.connect(to: peripheral)
-                        } label: {
-                            
-                            HStack {
-                                
-                                Image(
-                                    systemName: "dot.radiowaves.left.and.right"
-                                )
-                                
-                                VStack(
-                                    alignment: .leading,
-                                    spacing: 3
-                                ) {
-                                    
-                                    Text(
-                                        peripheral.name
-                                        ?? "Unnamed Device"
-                                    )
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                    
-                                    Text(
-                                        peripheral.identifier
-                                            .uuidString
-                                    )
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                }
-                                
-                                Spacer()
-                                
-                                if bleManager.connectedPeripheral?
-                                    .identifier == peripheral.identifier {
-                                    
-                                    Image(
-                                        systemName: "checkmark.circle.fill"
-                                    )
-                                    .foregroundStyle(.green)
-                                    
-                                } else {
-                                    
-                                    Image(
-                                        systemName: "chevron.right"
-                                    )
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                }
-                            }
-                            .contentShape(Rectangle())
+
+                    HStack(spacing: 10) {
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                            .font(.title3)
+                            .foregroundStyle(.green)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(peripheral.name ?? "Unnamed OBD Device")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .lineLimit(1)
+
+                            Text(peripheral.identifier.uuidString)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
-                        .buttonStyle(.plain)
+
+                        Spacer()
+
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
                     }
                 }
+            } else {
+                Text("No OBD device selected")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
-            
-            
-            // Connection status
-            
+
             Divider()
-            
+
             HStack {
                 Text("Connection")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                
+
                 Spacer()
-                
-                if let peripheral =
-                    bleManager.connectedPeripheral {
-                    
+
+                if let peripheral = bleManager.connectedPeripheral {
                     HStack(spacing: 5) {
                         Circle()
                             .fill(.green)
                             .frame(width: 7, height: 7)
-                        
-                        Text(
-                            peripheral.name
-                            ?? "Connected"
-                        )
-                        .font(.subheadline)
-                        .fontWeight(.medium)
+
+                        Text(peripheral.name ?? "Connected")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
                     }
-                    
                 } else {
-                    
                     Text("Not connected")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -409,9 +345,97 @@ struct BluetoothCard: View {
         }
         .padding()
         .background(.background)
-        .clipShape(
-            RoundedRectangle(cornerRadius: 20)
-        )
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .sheet(isPresented: $showingDevicePicker) {
+            DevicePickerSheet(bleManager: bleManager) {
+                showingDevicePicker = false
+            }
+        }
+    }
+}
+
+
+// MARK: - OBD Device Picker
+
+struct DevicePickerSheet: View {
+
+    var bleManager: BLEManager
+    let onDismiss: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if bleManager.discoveredDevices.isEmpty {
+                    VStack(spacing: 12) {
+                        if bleManager.isScanning {
+                            ProgressView()
+                            Text("Searching for BLE devices...")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Image(systemName: "antenna.radiowaves.left.and.right")
+                                .font(.largeTitle)
+
+                            Text("No BLE devices found")
+                                .font(.headline)
+
+                            Text("Start a scan to search for your OBD adapter.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 40)
+                    .listRowBackground(Color.clear)
+                } else {
+                    Section("Available BLE Devices") {
+                        ForEach(
+                            bleManager.discoveredDevices,
+                            id: \.identifier
+                        ) { peripheral in
+                            Button {
+                                bleManager.connect(to: peripheral)
+                                onDismiss()
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "antenna.radiowaves.left.and.right")
+                                        .font(.title3)
+
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(peripheral.name ?? "Unnamed BLE Device")
+                                            .font(.body)
+                                            .fontWeight(.medium)
+
+                                        Text(peripheral.identifier.uuidString)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+
+                                    Spacer()
+
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Select OBD Device")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        bleManager.stopScanning()
+                        onDismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 }
 

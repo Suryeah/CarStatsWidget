@@ -8,6 +8,8 @@
 import WidgetKit
 import SwiftUI
 
+// MARK: - Timeline Provider
+
 struct Provider: AppIntentTimelineProvider {
 
     func placeholder(in context: Context) -> SimpleEntry {
@@ -46,9 +48,9 @@ struct Provider: AppIntentTimelineProvider {
             configuration: configuration
         )
 
-        // The app requests an immediate widget refresh when a new
-        // SOC value is saved. This is only a fallback refresh.
-        let nextRefresh = Date().addingTimeInterval(15 * 60)
+        let nextRefresh = Date().addingTimeInterval(
+            15 * 60
+        )
 
         return Timeline(
             entries: [entry],
@@ -57,20 +59,70 @@ struct Provider: AppIntentTimelineProvider {
     }
 }
 
+// MARK: - Timeline Entry
+
 struct SimpleEntry: TimelineEntry {
+
     let date: Date
     let reading: SOCReading?
     let configuration: ConfigurationAppIntent
 }
 
+// MARK: - Main Widget View
+
 struct CarStatsWidgetWidgetEntryView: View {
+
+    var entry: Provider.Entry
+
+    @Environment(\.widgetFamily)
+    private var widgetFamily
+
+    var body: some View {
+
+        Group {
+
+            switch widgetFamily {
+
+            case .accessoryCircular:
+                LockScreenCircularView(
+                    entry: entry
+                )
+
+            case .accessoryRectangular:
+                LockScreenRectangularView(
+                    entry: entry
+                )
+
+            default:
+                HomeScreenView(
+                    entry: entry
+                )
+            }
+        }
+
+        // IMPORTANT:
+        // This must exist on the top-level widget view so that
+        // accessoryCircular and accessoryRectangular widgets
+        // also satisfy WidgetKit's container-background requirement.
+        .containerBackground(
+            .fill.tertiary,
+            for: .widget
+        )
+    }
+}
+
+// MARK: - Home Screen Widget
+
+struct HomeScreenView: View {
+
     var entry: Provider.Entry
 
     var body: some View {
+
         VStack(alignment: .leading, spacing: 0) {
 
-            // Header
             HStack {
+
                 Text("CarSOC")
                     .font(.headline)
                     .fontWeight(.semibold)
@@ -86,17 +138,25 @@ struct CarStatsWidgetWidgetEntryView: View {
 
             if let reading = entry.reading {
 
-                // Current SOC
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(String(format: "%.1f", reading.soc))
-                        .font(
-                            .system(
-                                size: 42,
-                                weight: .bold,
-                                design: .rounded
-                            )
+                HStack(
+                    alignment: .firstTextBaseline,
+                    spacing: 2
+                ) {
+
+                    Text(
+                        String(
+                            format: "%.1f",
+                            reading.soc
                         )
-                        .minimumScaleFactor(0.7)
+                    )
+                    .font(
+                        .system(
+                            size: 42,
+                            weight: .bold,
+                            design: .rounded
+                        )
+                    )
+                    .minimumScaleFactor(0.7)
 
                     Text("%")
                         .font(
@@ -111,8 +171,11 @@ struct CarStatsWidgetWidgetEntryView: View {
 
                 Spacer(minLength: 4)
 
-                // Time when this SOC value was recorded
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(
+                    alignment: .leading,
+                    spacing: 2
+                ) {
+
                     Text("Last recorded")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -134,7 +197,11 @@ struct CarStatsWidgetWidgetEntryView: View {
 
                 Spacer()
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(
+                    alignment: .leading,
+                    spacing: 4
+                ) {
+
                     Image(
                         systemName:
                             "antenna.radiowaves.left.and.right"
@@ -154,12 +221,122 @@ struct CarStatsWidgetWidgetEntryView: View {
             }
         }
         .padding()
-        .containerBackground(
-            .fill.tertiary,
-            for: .widget
-        )
     }
 }
+
+// MARK: - Lock Screen Circular
+
+struct LockScreenCircularView: View {
+
+    var entry: Provider.Entry
+
+    var body: some View {
+
+        if let reading = entry.reading {
+
+            Text(
+                String(
+                    format: "%.0f%%",
+                    reading.soc
+                )
+            )
+            .font(.headline)
+            .fontWeight(.bold)
+            .minimumScaleFactor(0.5)
+            .lineLimit(1)
+            .allowsTightening(true)
+
+        } else {
+
+            Image(
+                systemName: "battery.0percent"
+            )
+            .font(.headline)
+        }
+    }
+}
+// MARK: - Lock Screen Rectangular
+
+struct LockScreenRectangularView: View {
+
+    var entry: Provider.Entry
+
+    var body: some View {
+
+        if let reading = entry.reading {
+
+            HStack(
+                alignment: .center,
+                spacing: 8
+            ) {
+
+                VStack(
+                    alignment: .leading,
+                    spacing: 0
+                ) {
+
+                    Text("CAR SOC")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .lineLimit(1)
+
+                    Text(
+                        String(
+                            format: "%.1f%%",
+                            reading.soc
+                        )
+                    )
+                    .font(.headline)
+                    .fontWeight(.bold)
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+                }
+
+                Spacer(minLength: 4)
+
+                VStack(
+                    alignment: .trailing,
+                    spacing: 0
+                ) {
+
+                    Text("UPDATED")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .lineLimit(1)
+
+                    Text(
+                        reading.lastUpdated,
+                        format: .dateTime
+                            .hour()
+                            .minute()
+                    )
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
+                }
+            }
+
+        } else {
+
+            VStack(
+                alignment: .leading,
+                spacing: 0
+            ) {
+
+                Text("CAR SOC")
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+
+                Text("No data")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+// MARK: - Widget Configuration
 
 struct CarStatsWidgetWidget: Widget {
 
@@ -183,14 +360,56 @@ struct CarStatsWidgetWidget: Widget {
         )
         .supportedFamilies([
             .systemSmall,
-            .systemMedium
+            .systemMedium,
+            .accessoryCircular,
+            .accessoryRectangular
         ])
     }
 }
 
-#Preview(as: .systemSmall) {
+// MARK: - Preview
+
+#Preview(
+    "Home Small",
+    as: .systemSmall
+) {
     CarStatsWidgetWidget()
 } timeline: {
+
+    SimpleEntry(
+        date: .now,
+        reading: SOCReading(
+            soc: 94.7,
+            lastUpdated: .now
+        ),
+        configuration: ConfigurationAppIntent()
+    )
+}
+
+#Preview(
+    "Lock Screen Circular",
+    as: .accessoryCircular
+) {
+    CarStatsWidgetWidget()
+} timeline: {
+
+    SimpleEntry(
+        date: .now,
+        reading: SOCReading(
+            soc: 94.7,
+            lastUpdated: .now
+        ),
+        configuration: ConfigurationAppIntent()
+    )
+}
+
+#Preview(
+    "Lock Screen Rectangular",
+    as: .accessoryRectangular
+) {
+    CarStatsWidgetWidget()
+} timeline: {
+
     SimpleEntry(
         date: .now,
         reading: SOCReading(
