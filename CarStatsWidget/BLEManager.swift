@@ -32,6 +32,12 @@ final class BLEManager: NSObject {
     private var rxNotificationsReady = false
     private var pollingTimer: Timer?
     private var pollingInterval: TimeInterval = 5.0
+    
+    private let lastConnectedDeviceKey = "lastConnectedBLEDeviceUUID"
+
+    private var autoReconnectUUID: UUID?
+    private var autoReconnectScanTimer: Timer?
+    private var didAttemptAutoReconnect = false
 
     private(set) var soc: Int?
     
@@ -44,6 +50,77 @@ final class BLEManager: NSObject {
             delegate: self,
             queue: nil
         )
+    }
+    
+    // MARK: - Automatic Reconnection
+
+    private func attemptAutoReconnect() {
+
+        guard !didAttemptAutoReconnect else {
+            return
+        }
+
+        didAttemptAutoReconnect = true
+
+        guard
+            let uuidString = UserDefaults.standard.string(
+                forKey: lastConnectedDeviceKey
+            ),
+            let uuid = UUID(uuidString: uuidString)
+        else {
+            print("AUTO RECONNECT: No saved BLE device")
+            return
+        }
+
+        autoReconnectUUID = uuid
+
+        print("AUTO RECONNECT: Looking for", uuid)
+
+        // First try CoreBluetooth's known-peripheral cache.
+        let peripherals = centralManager.retrievePeripherals(
+            withIdentifiers: [uuid]
+        )
+
+        if let peripheral = peripherals.first {
+
+            print(
+                "AUTO RECONNECT: Found known device:",
+                peripheral.name ?? "Unknown"
+            )
+
+            connect(to: peripheral)
+            return
+        }
+
+        // Peripheral isn't currently in CoreBluetooth's cache.
+        // Perform a short background scan and look specifically
+        // for the saved UUID.
+        print("AUTO RECONNECT: Starting background scan")
+
+        centralManager.scanForPeripherals(
+            withServices: nil,
+            options: [
+                CBCentralManagerScanOptionAllowDuplicatesKey: false
+            ]
+        )
+
+        autoReconnectScanTimer?.invalidate()
+
+        autoReconnectScanTimer = Timer.scheduledTimer(
+            withTimeInterval: 10,
+            repeats: false
+        ) { [weak self] _ in
+
+            guard let self else {
+                return
+            }
+
+            print("AUTO RECONNECT: Device not found")
+
+            self.centralManager.stopScan()
+            self.autoReconnectUUID = nil
+            self.autoReconnectScanTimer = nil
+        }
     }
     
     
@@ -82,15 +159,19 @@ final class BLEManager: NSObject {
     // MARK: - Connection
     
     func connect(to peripheral: CBPeripheral) {
-        
+
         stopScanning()
-        
+
+        autoReconnectScanTimer?.invalidate()
+        autoReconnectScanTimer = nil
+        autoReconnectUUID = nil
+
         print("Connecting to:")
         print(peripheral.name ?? "Unknown")
-        
+
         connectedPeripheral = peripheral
         peripheral.delegate = self
-        
+
         centralManager.connect(
             peripheral,
             options: nil
@@ -214,6 +295,8 @@ extension BLEManager: CBCentralManagerDelegate {
             isBluetoothReady = true
             print("Bluetooth: Powered On")
             
+            attemptAutoReconnect()
+            
         case .poweredOff:
             isBluetoothReady = false
             print("Bluetooth: Powered Off")
@@ -246,22 +329,47 @@ extension BLEManager: CBCentralManagerDelegate {
         advertisementData: [String : Any],
         rssi RSSI: NSNumber
     ) {
-        
+
+        if let targetUUID = autoReconnectUUID {
+
+            guard peripheral.identifier == targetUUID else {
+                return
+            }
+
+            print(
+                "AUTO RECONNECT: Found target device:",
+                peripheral.name ?? "Unknown"
+            )
+
+            autoReconnectScanTimer?.invalidate()
+            autoReconnectScanTimer = nil
+
+            centralManager.stopScan()
+
+            autoReconnectUUID = nil
+
+            connect(to: peripheral)
+
+            return
+        }
+
+        // Existing manual-scan behaviour below this point
+
         let name = peripheral.name ?? "Unnamed BLE Device"
-        
+
         print(
             "BLE Device:",
             name,
             "RSSI:",
             RSSI
         )
-        
+
         guard !discoveredDevices.contains(
             where: { $0.identifier == peripheral.identifier }
         ) else {
             return
         }
-        
+
         discoveredDevices.append(peripheral)
     }
     
@@ -277,6 +385,16 @@ extension BLEManager: CBCentralManagerDelegate {
         )
         
         connectedPeripheral = peripheral
+        
+        UserDefaults.standard.set(
+            peripheral.identifier.uuidString,
+            forKey: lastConnectedDeviceKey
+        )
+
+        print(
+            "AUTO RECONNECT: Saved device:",
+            peripheral.identifier.uuidString
+        )
         
         peripheral.discoverServices(nil)
     }
