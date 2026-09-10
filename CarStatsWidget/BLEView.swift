@@ -9,14 +9,15 @@ import SwiftUI
 import CoreBluetooth
 
 struct BLEView: View {
-    @State private var bleManager: BLEManager
+    let bleManager: BLEManager
     let vehicleManager: VehicleManager
 
-    init(vehicleManager: VehicleManager) {
+    init(
+        bleManager: BLEManager,
+        vehicleManager: VehicleManager
+    ) {
+        self.bleManager = bleManager
         self.vehicleManager = vehicleManager
-        _bleManager = State(
-            initialValue: BLEManager(vehicleManager: vehicleManager)
-        )
     }
 
     var body: some View {
@@ -192,5 +193,11 @@ struct BLEView: View {
 }
 
 #Preview {
-    BLEView(vehicleManager: VehicleManager())
+    let vehicleManager = VehicleManager()
+    let bleManager = BLEManager(vehicleManager: vehicleManager)
+
+    BLEView(
+        bleManager: bleManager,
+        vehicleManager: vehicleManager
+    )
 }
