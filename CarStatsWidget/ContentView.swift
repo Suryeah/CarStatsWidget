@@ -103,6 +103,24 @@ struct ContentView: View {
                     )
                     
                     
+                    // MARK: - Manual SOC Update
+
+                    Button {
+                        bleManager.requestSOC()
+                    } label: {
+                        Label(
+                            "Update SOC",
+                            systemImage: "arrow.clockwise"
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(
+                        !bleManager.isBluetoothReady ||
+                        bleManager.connectedPeripheral == nil
+                    )
+
+
                     // MARK: - Last Updated
                     
                     InfoCard(

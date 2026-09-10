@@ -9,6 +9,7 @@ import Foundation
 import CoreBluetooth
 import Observation
 import OSLog
+import UIKit
 
 @Observable
 final class BLEManager: NSObject {
@@ -40,11 +41,6 @@ final class BLEManager: NSObject {
     private var autoReconnectUUID: UUID?
     private var autoReconnectScanTimer: Timer?
     private var didAttemptAutoReconnect = false
-
-    // Core Bluetooth may restore peripherals before the central reaches .poweredOn.
-    // Keep the restored peripheral here and finish restoration from
-    // centralManagerDidUpdateState once Bluetooth is ready.
-    private var restoredPeripheral: CBPeripheral?
     
     private var userRequestedDisconnect = false
     private let centralRestoreIdentifier = "com.surya.CarStatsWidget.bluetoothCentral"
@@ -64,7 +60,24 @@ final class BLEManager: NSObject {
                     centralRestoreIdentifier
             ]
         )
-logger.info("BLEManager initialized")
+
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.logger.info("APP entered background")
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.logger.info("APP will enter foreground")
+        }
+
+        logger.info("BLEManager initialized")
     }
     
     // MARK: - Automatic Reconnection
@@ -174,11 +187,6 @@ logger.info("BLEManager initialized")
     // MARK: - Connection
     
     func connect(to peripheral: CBPeripheral) {
-        guard isBluetoothReady else {
-            logger.warning("Connect requested while Bluetooth is not powered on")
-            return
-        }
-
         
         userRequestedDisconnect = false
 
@@ -326,51 +334,43 @@ extension BLEManager: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(
         _ central: CBCentralManager
     ) {
+        
         switch central.state {
+            
         case .poweredOn:
             isBluetoothReady = true
             print("Bluetooth: Powered On")
             logger.info("Bluetooth powered ON")
-
-            if let restoredPeripheral {
-                self.restoredPeripheral = nil
-                self.connectedPeripheral = restoredPeripheral
-                restoredPeripheral.delegate = self
-
-                if restoredPeripheral.state == .connected {
-                    print("BLE: Completing restoration for connected peripheral")
-                    logger.info("Completing restoration for connected peripheral")
-                    restoredPeripheral.discoverServices(nil)
-                    didAttemptAutoReconnect = true
-                    return
-                }
-
-                print("BLE: Restored peripheral is not connected")
-                logger.info(
-                    "Restored peripheral is not connected; continuing auto reconnect"
-                )
-            }
-
+            
             attemptAutoReconnect()
-
+            
         case .poweredOff:
             isBluetoothReady = false
+            print("Bluetooth: Powered Off")
             logger.warning("Bluetooth powered OFF")
+            
         case .unauthorized:
             isBluetoothReady = false
+            print("Bluetooth: Unauthorized")
             logger.error("Bluetooth unauthorized")
+            
         case .unsupported:
             isBluetoothReady = false
+            print("Bluetooth: Unsupported")
             logger.error("Bluetooth unsupported")
+            
         case .resetting:
             isBluetoothReady = false
+            print("Bluetooth: Resetting")
             logger.warning("Bluetooth resetting")
+            
         case .unknown:
             isBluetoothReady = false
+            print("Bluetooth: Unknown")
             logger.warning("Bluetooth state unknown")
+            
         @unknown default:
             isBluetoothReady = false
-            logger.warning("Bluetooth state unknown/default")
         }
     }
     
@@ -533,6 +533,7 @@ extension BLEManager: CBCentralManagerDelegate {
         _ central: CBCentralManager,
         willRestoreState dict: [String : Any]
     ) {
+
         print("BLE: Restoring Core Bluetooth state")
         logger.info("Core Bluetooth restoring state")
 
@@ -541,12 +542,10 @@ extension BLEManager: CBCentralManagerDelegate {
                 CBCentralManagerRestoredStatePeripheralsKey
             ] as? [CBPeripheral]
         else {
-            logger.info("No restored peripherals")
             return
         }
 
         guard let peripheral = peripherals.first else {
-            logger.info("Restored peripheral list is empty")
             return
         }
 
@@ -556,25 +555,20 @@ extension BLEManager: CBCentralManagerDelegate {
             peripheral.identifier.uuidString
         )
 
-        logger.info(
-            "Restored peripheral: \(peripheral.name ?? "Unknown", privacy: .public)"
-        )
-
-        restoredPeripheral = peripheral
         connectedPeripheral = peripheral
         peripheral.delegate = self
 
         if peripheral.state == .connected {
             print("BLE: Restored peripheral is already connected")
             logger.info("Restored peripheral is already connected")
+            peripheral.discoverServices(nil)
         } else {
-            print("BLE: Restored peripheral state:", peripheral.state.rawValue)
+            print(
+                "BLE: Restored peripheral state:",
+                peripheral.state.rawValue
+            )
             logger.info("Restored peripheral state: \(peripheral.state.rawValue)")
         }
-
-        // Do not call discoverServices() or connect() here.
-        // willRestoreState can occur before CBCentralManager reaches .poweredOn.
-        // Restoration is completed from centralManagerDidUpdateState.
     }
 }
 
