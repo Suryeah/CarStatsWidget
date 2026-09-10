@@ -8,11 +8,14 @@
 import Foundation
 import CoreBluetooth
 import Observation
+import OSLog
+import UIKit
 
 @Observable
 final class BLEManager: NSObject {
     
     private var centralManager: CBCentralManager!
+    private let logger = Logger(subsystem: "com.surya.CarStatsWidget", category: "BLE")
     
     private(set) var isBluetoothReady = false
     private(set) var isScanning = false
@@ -38,6 +41,9 @@ final class BLEManager: NSObject {
     private var autoReconnectUUID: UUID?
     private var autoReconnectScanTimer: Timer?
     private var didAttemptAutoReconnect = false
+    
+    private var userRequestedDisconnect = false
+    private let centralRestoreIdentifier = "com.surya.CarStatsWidget.bluetoothCentral"
 
     private(set) var soc: Int?
     
@@ -48,8 +54,30 @@ final class BLEManager: NSObject {
         
         centralManager = CBCentralManager(
             delegate: self,
-            queue: nil
+            queue: nil,
+            options: [
+                CBCentralManagerOptionRestoreIdentifierKey:
+                    centralRestoreIdentifier
+            ]
         )
+
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.logger.info("APP entered background")
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.logger.info("APP will enter foreground")
+        }
+
+        logger.info("BLEManager initialized")
     }
     
     // MARK: - Automatic Reconnection
@@ -159,6 +187,8 @@ final class BLEManager: NSObject {
     // MARK: - Connection
     
     func connect(to peripheral: CBPeripheral) {
+        
+        userRequestedDisconnect = false
 
         stopScanning()
 
@@ -180,6 +210,7 @@ final class BLEManager: NSObject {
     
     
     func disconnect() {
+        userRequestedDisconnect = true
         stopPolling()
 
         guard let peripheral = connectedPeripheral else {
@@ -208,14 +239,26 @@ final class BLEManager: NSObject {
         stopPolling()
 
         // Request once immediately, then continue at the selected interval.
+        logger.info(
+            "SOC polling started: interval=\(self.pollingInterval, privacy: .public)s"
+        )
+
         requestSOC()
 
-        pollingTimer = Timer.scheduledTimer(withTimeInterval: pollingInterval, repeats: true) { [weak self] _ in
+        let interval = pollingInterval
+
+        pollingTimer = Timer.scheduledTimer(
+            withTimeInterval: interval,
+            repeats: true
+        ) { [weak self] _ in
             self?.requestSOC()
         }
     }
 
     private func stopPolling() {
+        if pollingTimer != nil {
+            logger.info("SOC polling stopped")
+        }
         pollingTimer?.invalidate()
         pollingTimer = nil
     }
@@ -226,11 +269,13 @@ final class BLEManager: NSObject {
 
         guard let peripheral = connectedPeripheral else {
             print("SOC: No connected peripheral")
+            logger.warning("SOC request skipped: no connected peripheral")
             return
         }
 
         guard let characteristic = txCharacteristic else {
             print("SOC: TX characteristic not available")
+            logger.warning("SOC request skipped: TX characteristic unavailable")
             return
         }
 
@@ -241,6 +286,7 @@ final class BLEManager: NSObject {
         let command = "223421\r"
 
         print("SOC TX:", command.trimmingCharacters(in: .newlines))
+        logger.debug("SOC request transmitted")
 
         if let data = command.data(using: .ascii) {
             peripheral.writeValue(
@@ -294,28 +340,34 @@ extension BLEManager: CBCentralManagerDelegate {
         case .poweredOn:
             isBluetoothReady = true
             print("Bluetooth: Powered On")
+            logger.info("Bluetooth powered ON")
             
             attemptAutoReconnect()
             
         case .poweredOff:
             isBluetoothReady = false
             print("Bluetooth: Powered Off")
+            logger.warning("Bluetooth powered OFF")
             
         case .unauthorized:
             isBluetoothReady = false
             print("Bluetooth: Unauthorized")
+            logger.error("Bluetooth unauthorized")
             
         case .unsupported:
             isBluetoothReady = false
             print("Bluetooth: Unsupported")
+            logger.error("Bluetooth unsupported")
             
         case .resetting:
             isBluetoothReady = false
             print("Bluetooth: Resetting")
+            logger.warning("Bluetooth resetting")
             
         case .unknown:
             isBluetoothReady = false
             print("Bluetooth: Unknown")
+            logger.warning("Bluetooth state unknown")
             
         @unknown default:
             isBluetoothReady = false
@@ -383,6 +435,7 @@ extension BLEManager: CBCentralManagerDelegate {
             "CONNECTED:",
             peripheral.name ?? "Unknown"
         )
+        logger.info("Peripheral connected: \(peripheral.name ?? "Unknown", privacy: .public)")
         
         connectedPeripheral = peripheral
         
@@ -410,6 +463,7 @@ extension BLEManager: CBCentralManagerDelegate {
             "FAILED TO CONNECT:",
             error?.localizedDescription ?? "Unknown error"
         )
+        logger.error("Peripheral failed to connect: \(error?.localizedDescription ?? "Unknown error", privacy: .public)")
         
         connectedPeripheral = nil
     }
@@ -425,6 +479,7 @@ extension BLEManager: CBCentralManagerDelegate {
             "DISCONNECTED:",
             peripheral.name ?? "Unknown"
         )
+        logger.warning("Peripheral disconnected: \(peripheral.name ?? "Unknown", privacy: .public)")
         
         stopPolling()
         connectedPeripheral = nil
@@ -436,6 +491,84 @@ extension BLEManager: CBCentralManagerDelegate {
         
         rxBuffer = ""
         rxNotificationsReady = false
+
+        guard !userRequestedDisconnect else {
+            print("BLE: User requested disconnect")
+            return
+        }
+
+        print("BLE: Unexpected disconnect")
+
+        // Give Core Bluetooth a chance to reconnect.
+        centralManager.connect(
+            peripheral,
+            options: [
+                CBConnectPeripheralOptionEnableAutoReconnect: true
+            ]
+        )
+    }
+    
+    func centralManager(
+        _ central: CBCentralManager,
+        didDisconnectPeripheral peripheral: CBPeripheral,
+        timestamp: CFAbsoluteTime,
+        isReconnecting: Bool,
+        error: Error?
+    ) {
+        print(
+            "BLE DISCONNECT:",
+            peripheral.name ?? "Unknown",
+            "reconnecting:",
+            isReconnecting,
+            "error:",
+            error?.localizedDescription ?? "none"
+        )
+
+        logger.warning(
+            "Disconnect callback. Reconnecting: \(isReconnecting), error: \(error?.localizedDescription ?? "none", privacy: .public)"
+        )
+    }
+
+    func centralManager(
+        _ central: CBCentralManager,
+        willRestoreState dict: [String : Any]
+    ) {
+
+        print("BLE: Restoring Core Bluetooth state")
+        logger.info("Core Bluetooth restoring state")
+
+        guard
+            let peripherals = dict[
+                CBCentralManagerRestoredStatePeripheralsKey
+            ] as? [CBPeripheral]
+        else {
+            return
+        }
+
+        guard let peripheral = peripherals.first else {
+            return
+        }
+
+        print(
+            "BLE: Restored peripheral:",
+            peripheral.name ?? "Unknown",
+            peripheral.identifier.uuidString
+        )
+
+        connectedPeripheral = peripheral
+        peripheral.delegate = self
+
+        if peripheral.state == .connected {
+            print("BLE: Restored peripheral is already connected")
+            logger.info("Restored peripheral is already connected")
+            peripheral.discoverServices(nil)
+        } else {
+            print(
+                "BLE: Restored peripheral state:",
+                peripheral.state.rawValue
+            )
+            logger.info("Restored peripheral state: \(peripheral.state.rawValue)")
+        }
     }
 }
 
@@ -595,6 +728,7 @@ extension BLEManager: CBPeripheralDelegate {
             "RX characteristic:",
             characteristic.uuid.uuidString
         )
+        logger.debug("RX notification received")
         
         print(
             "RX raw data:",
@@ -615,6 +749,7 @@ extension BLEManager: CBPeripheralDelegate {
             "RX ASCII:",
             response.debugDescription
         )
+        logger.debug("RX ASCII chunk received")
         
         // ---------------------------------------------------------
         // IMPORTANT:
@@ -643,6 +778,7 @@ extension BLEManager: CBPeripheralDelegate {
         print(
             "===== COMPLETE ELM RESPONSE ====="
         )
+        logger.debug("Complete ELM327 response received")
         
         print(
             completeResponse.debugDescription
@@ -680,6 +816,7 @@ extension BLEManager: CBPeripheralDelegate {
             print(
                 "SOC: DID 3421 not found"
             )
+            logger.warning("SOC DID 3421 not found in response")
             print(
                 "=================================="
             )
@@ -703,6 +840,7 @@ extension BLEManager: CBPeripheralDelegate {
             print(
                 "SOC: Incomplete DID 3421 response"
             )
+            logger.warning("Incomplete DID 3421 response")
             print(
                 "=================================="
             )
@@ -741,6 +879,7 @@ extension BLEManager: CBPeripheralDelegate {
         print(
             "===== SOC DECODE ====="
         )
+        logger.info("SOC decoded: \(String(format: "%.1f", soc), privacy: .public)%")
         
         print(
             "SOC raw:",
